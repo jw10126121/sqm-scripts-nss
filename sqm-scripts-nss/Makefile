@@ -11,11 +11,11 @@ define Package/sqm-scripts-nss
   DEPENDS:=+sqm-scripts +kmod-qca-nss-drv-qdisc +kmod-qca-nss-drv-igs
   PKGARCH:=all
   CATEGORY:=Base system
-  TITLE:=SQM Scripts (QoS for NSS)
+  TITLE:=SQM Scripts (QoS for IPQ60xx/IPQ807x NSS)
 endef
 
 define Package/sqm-scripts-nss/description
-  Smart Queue Management Scripts for OpenWRT for use with NSS enabled builds.
+  Smart Queue Management Scripts for OpenWrt Qualcomm IPQ60xx/IPQ807x NSS-enabled builds.
 endef
 
 define Build/Configure

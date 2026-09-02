@@ -1,14 +1,14 @@
-# sqm-scripts-nss: Hardware-Accelerated SQM for Qualcomm NSS (IPQ807x)
+# sqm-scripts-nss: Hardware-Accelerated SQM for Qualcomm NSS (IPQ60xx/IPQ807x)
 
 > Eliminate bufferbloat on OpenWrt with **zero CPU overhead** using Qualcomm NSS hardware offload. Achieve A+ bufferbloat grades at 300+ Mbps while your router's CPU stays idle.
 
-This is a fork of [qosmio/sqm-scripts-nss](https://github.com/qosmio/sqm-scripts-nss) with a flattened qdisc hierarchy, automatic overhead detection, tighter queue limits, and dead code removal. Tested on IPQ807x (Qualcomm IPQ8074) with kernel 6.12, PPPoE, VLAN 7, and 300 Mbps FTTH.
+This is a fork of [qosmio/sqm-scripts-nss](https://github.com/qosmio/sqm-scripts-nss) with a flattened qdisc hierarchy, automatic overhead detection, tighter queue limits, and dead code removal. The implementation is validated on IPQ807x (Qualcomm IPQ8074) with kernel 6.12, PPPoE, VLAN 7, and 300 Mbps FTTH, and supports IPQ60xx (including IPQ6010/IPQ6018) when the firmware exposes the required NSS qdisc capabilities.
 
 **Maintainer:** Julius Bairaktaris — [julius@bairaktaris.de](mailto:julius@bairaktaris.de)
 
 ## Why NSS SQM?
 
-Standard SQM (fq_codel, CAKE) runs on the router's CPU. On a Qualcomm IPQ807x, the **NSS (Network Subsystem)** co-processor handles packet scheduling in dedicated hardware, freeing the CPU entirely. This means:
+Standard SQM (fq_codel, CAKE) runs on the router's CPU. On Qualcomm IPQ60xx/IPQ807x platforms, the **NSS (Network Subsystem)** co-processor handles packet scheduling in dedicated hardware, freeing the CPU entirely. This means:
 
 - **No CPU load** from traffic shaping, even at gigabit speeds
 - **Consistent latency** regardless of what else the router is doing (WiFi, NAT, firewall)
@@ -24,7 +24,7 @@ See [Fork Changes](#fork-changes-v20260215) for the full technical breakdown wit
 
 ## Requirements
 
-- OpenWrt with NSS support (IPQ807x / IPQ8074 platform)
+- OpenWrt with NSS support (IPQ60xx, including IPQ6010/IPQ6018, or IPQ807x platform)
 - `sqm-scripts` package
 - `kmod-qca-nss-drv-qdisc` and `kmod-qca-nss-drv-igs` kernel modules
 - `luci-app-sqm` (optional, for GUI configuration)
@@ -79,6 +79,14 @@ qdisc nssfq_codel 10: parent 1: target 4ms limit 354p interval 50ms
 ```
 
 If you see `nssprio`, `nsspfifo`, or `nssred` in the output, the old upstream script is still loaded.
+
+The script logs the detected device-tree platform for diagnostics, but does not use the SoC name to guess shaping parameters. Check it with:
+
+```bash
+logread | grep 'NSS platform'
+```
+
+Unknown platform names are allowed when the required NSS modules and qdisc commands work; firmware capability is the compatibility check.
 
 ### Overhead (Auto-Detected)
 
@@ -269,7 +277,7 @@ No. NSS hardware only supports `nssfq_codel`. CAKE, HFSC, and HTB are software-o
 
 ### What routers are supported?
 
-Any OpenWrt router with a **Qualcomm IPQ807x / IPQ8074** SoC and NSS-enabled firmware. Common models include the Dynalink DL-WRX36, Xiaomi AX9000, and Netgear WAX630. The NSS co-processor must be active with `kmod-qca-nss-drv-qdisc` loaded.
+Any OpenWrt router with a **Qualcomm IPQ60xx (including IPQ6010/IPQ6018) or IPQ807x / IPQ8074** SoC and NSS-enabled firmware. The NSS co-processor must be active with `kmod-qca-nss-drv-qdisc` and `kmod-qca-nss-drv-igs` loaded, and the firmware's `tc` must support `nsstbl`, `nssfq_codel`, and `nssmirred`. SoC identification is diagnostic only; unsupported firmware will fail during qdisc setup and be rolled back.
 
 ### How is this different from qosmate?
 

@@ -1,14 +1,14 @@
 #!/bin/sh
 # shellcheck disable=2086,3010,1091,3043,2034
 ###############################################################################
-# nss-zk.qos -- HW-accelerated SQM for Qualcomm NSS (IPQ807x)
+# nss-zk.qos -- HW-accelerated SQM for Qualcomm NSS (IPQ60xx/IPQ807x)
 # version 20260216
 #
 # Flat qdisc hierarchy: nsstbl (shaper) -> nssfq_codel (AQM), per direction.
 # All packet scheduling is offloaded to the NSS co-processor (accel_mode 0).
 #
 # Requirements:
-#   - Platform:  IPQ807x (Qualcomm IPQ8074)
+#   - Platform:  IPQ60xx (IPQ6010/IPQ6018) or IPQ807x with NSS support
 #   - Packages:  iproute2, tc (or tc-tiny), sqm-scripts
 #   - Kmods:     kmod-qca-nss-drv-qdisc, kmod-qca-nss-drv-igs
 #
@@ -59,6 +59,26 @@ MINLIMIT=200
 ###############################################################################
 # Utility functions
 ###############################################################################
+
+# Return a normalized platform name for diagnostics.  Compatibility is decided
+# by the NSS modules and tc return codes, not by this value.
+nss_platform_detect() {
+	local compatible_file="${NSS_COMPATIBLE_FILE:-/proc/device-tree/compatible}"
+	local compatible
+
+	[ -r "$compatible_file" ] || {
+		echo unknown
+		return 0
+	}
+	compatible=$(tr '\000' '\n' < "$compatible_file" 2>/dev/null) || compatible=
+	case "$compatible" in
+	*ipq6010*) echo ipq6010 ;;
+	*ipq6018*) echo ipq6018 ;;
+	*ipq60*) echo ipq60xx ;;
+	*ipq807*|*ipq8074*) echo ipq807x ;;
+	*) echo unknown ;;
+	esac
+}
 
 # Verify the interface has an IP before proceeding.
 # PPPoE/DS-Lite/MAP interfaces may not have an IP yet at boot time;
@@ -246,6 +266,14 @@ add_nssfq_codel() {
 		${opts} set_default accel_mode 0
 }
 
+# Log the qdisc state without running a separate destructive capability probe.
+nss_log_qdisc_state() {
+	local iface=$1 state
+
+	state=$($TC qdisc show dev "$iface" 2>/dev/null)
+	[ -n "$state" ] && sqm_debug "nss_log_qdisc_state: ${iface}: ${state}"
+}
+
 ###############################################################################
 # Direction setup
 ###############################################################################
@@ -338,11 +366,13 @@ sqm_prepare_script() {
 }
 
 sqm_start() {
-	local protocol
+	local protocol platform status=0
 
 	[ -n "$IFACE" ] || return 1
 
 	network_get_protocol protocol "$IFACE"
+	platform=$(nss_platform_detect)
+	sqm_log "sqm_start: NSS platform=${platform}"
 
 	if [ "$protocol" = "wireguard" ]; then
 		sqm_error "sqm_start: Wireguard (${IFACE}) is not supported by NSS"
@@ -358,9 +388,11 @@ sqm_start() {
 	if [ "${UPLINK}" -ne 0 ]; then
 		CUR_DIRECTION="egress"
 		if fn_exists egress && egress; then
+			nss_log_qdisc_state "${IFACE}"
 			sqm_log "sqm_start: egress shaping activated"
 		else
 			sqm_warn "sqm_start: egress setup failed"
+			status=1
 		fi
 	else
 		SILENT=1 $TC qdisc del dev ${IFACE} root 2>/dev/null
@@ -370,13 +402,21 @@ sqm_start() {
 	if [ "${DOWNLINK}" -ne 0 ]; then
 		CUR_DIRECTION="ingress"
 		if fn_exists ingress && ingress; then
+			nss_log_qdisc_state "${DEV}"
 			sqm_log "sqm_start: ingress shaping activated"
 		else
 			sqm_warn "sqm_start: ingress setup failed"
+			status=1
 		fi
 	else
 		SILENT=1 $TC qdisc del dev ${DEV} root 2>/dev/null
 		sqm_log "sqm_start: ingress shaping disabled (DOWNLINK=0)"
+	fi
+
+	if [ "$status" -ne 0 ]; then
+		sqm_warn "sqm_start: NSS setup failed, rolling back partial configuration"
+		sqm_stop
+		return 1
 	fi
 
 	return 0
